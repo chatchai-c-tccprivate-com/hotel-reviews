@@ -1,0 +1,43 @@
+name: Scrape Hotel Reviews
+
+# รันอัตโนมัติทุกวันจันทร์ 08:00 เวลาไทย (= 01:00 UTC) + กดรันเองได้
+on:
+  schedule:
+    - cron: "0 1 * * 1"
+  workflow_dispatch:
+    inputs:
+      max_reviews:
+        description: "จำนวนรีวิวสูงสุดต่อโรงแรม (รอบ backfill ใส่ 1000)"
+        required: false
+        default: "40"
+
+permissions:
+  contents: write   # ให้ commit ผลกลับเข้า repo ได้
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run scraper
+        run: |
+          python scrape_reviews.py --max-reviews "${{ github.event.inputs.max_reviews || '40' }}"
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data/summary.csv data/reviews.csv
+          git commit -m "Update reviews $(date -u +%Y-%m-%d) [skip ci]" || echo "no changes"
+          git push
