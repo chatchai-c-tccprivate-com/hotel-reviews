@@ -27,17 +27,21 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install playwright==1.47.0 openpyxl
           python -m playwright install --with-deps chromium
 
       - name: Run scraper
         run: |
           python scrape_reviews.py --max-reviews "${{ github.event.inputs.max_reviews || '40' }}"
 
+      - name: Build Excel report
+        run: |
+          python analyze_reviews.py
+
       - name: Commit results
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add data/summary.csv data/reviews.csv
+          git add data/summary.csv data/reviews.csv report.xlsx
           git commit -m "Update reviews $(date -u +%Y-%m-%d) [skip ci]" || echo "no changes"
           git push
