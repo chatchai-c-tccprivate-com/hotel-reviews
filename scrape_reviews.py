@@ -14,7 +14,7 @@ Google Maps Reviews Scraper (ฟรี, รันบน GitHub Actions / Windows
 ให้ปรับ SELECTORS ด้านล่าง (จุดเดียวที่ต้องแก้เวลาพัง)
 """
 
-import csv, os, sys, time, random, hashlib, argparse, datetime
+import csv, os, sys, time, random, hashlib, argparse, datetime, re
 from playwright.sync_api import sync_playwright
 
 DATA_DIR = "data"
@@ -133,8 +133,45 @@ def get_place_meta(page):
     return rating, total
 
 
+def scroll_pane(page):
+    """เลื่อนหน้ารีวิวแบบ re-query ทุกครั้ง กัน handle หลุด (เคยทำ IPL พลาด)"""
+    try:
+        pane = page.query_selector(SELECTORS["scroll_pane"])
+        if pane:
+            box = pane.bounding_box()
+            if box:
+                page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                page.mouse.wheel(0, 3000)
+                return
+            page.evaluate("(el)=>el.scrollBy(0, el.scrollHeight)", pane)
+            return
+    except Exception:
+        pass
+    try:
+        page.keyboard.press("PageDown")
+    except Exception:
+        pass
+
+
+def card_rating(card):
+    """ดึงดาวของรีวิว — ลองหลาย selector เพราะ Google มีหลายเลย์เอาต์ (จุดที่ต้องแก้ถ้าดาวยังว่าง)"""
+    sels = ['span.kvMYJc', 'span[role="img"][aria-label]',
+            'g-review-stars span', '[aria-label*="ดาว"]',
+            '[aria-label*="star"]', '[aria-label*="Star"]']
+    for sel in sels:
+        try:
+            el = card.query_selector(sel)
+        except Exception:
+            el = None
+        if el:
+            lab = el.get_attribute("aria-label") or ""
+            m = re.search(r'([0-5](?:[.,]\d)?)', lab)
+            if m:
+                return m.group(1).replace(",", ".")
+    return ""
+
+
 def scrape_reviews(page, code, max_reviews):
-    pane = page.query_selector(SELECTORS["scroll_pane"])
     seen_cards, collected = 0, []
     stagnant = 0
     while len(collected) < max_reviews and stagnant < 6:
@@ -148,11 +185,7 @@ def scrape_reviews(page, code, max_reviews):
                 author = (card.query_selector(SELECTORS["author"]).inner_text() or "").strip()
             except Exception:
                 author = ""
-            try:
-                rating = (card.query_selector(SELECTORS["rating_aria"]).get_attribute("aria-label") or "").strip()
-                rating = "".join(ch for ch in rating if ch.isdigit())[:1]
-            except Exception:
-                rating = ""
+            rating = card_rating(card)
             try:
                 rel = (card.query_selector(SELECTORS["rel_time"]).inner_text() or "").strip()
             except Exception:
@@ -169,8 +202,7 @@ def scrape_reviews(page, code, max_reviews):
         else:
             stagnant = 0
         seen_cards = new_count
-        if pane:
-            page.evaluate("(el)=>el.scrollBy(0, el.scrollHeight)", pane)
+        scroll_pane(page)
         sleep(0.8, 1.6)
     return collected[:max_reviews]
 
